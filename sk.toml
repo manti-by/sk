@@ -1,0 +1,17 @@
+[project]
+name = "sk"
+version = "0.1.0"
+description = "Manage agent skills"
+readme = "README.md"
+license = "MIT"
+authors = ["Alexander Chaika"]
+keywords = ["agent", "skills", "cli"]
+
+# Each entry is a link to a directory containing a SKILL.md. The skill is
+# installed under .agents/skills/<last path segment>/SKILL.md. Prefix an entry
+# with "name = " to choose the directory name yourself.
+[skills]
+skills = [
+  "https://github.com/manti-by/openwiki/tree/master/skills/wiki-consistency",
+  "code-review = https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review",
+]

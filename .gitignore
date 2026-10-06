@@ -1,0 +1,8 @@
+.agents/
+.claude/
+.opencode/
+
+.env
+.DS_Store
+
+target/
