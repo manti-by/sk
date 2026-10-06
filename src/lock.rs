@@ -7,7 +7,12 @@ use crate::error::{Error, Result};
 use crate::paths::Layout;
 
 /// Lock format version written by this build of `sk`.
-pub const LOCK_VERSION: u32 = 1;
+///
+/// Bump this whenever the shape of `sk.lock` changes, for example when a field
+/// is added to `Entry`. A lock from an older version is read and rewritten by
+/// the next sync, as long as its version is positive, so a bump costs one
+/// `sk sync` and never a hand-edited lock.
+pub const LOCK_VERSION: u32 = 2;
 
 /// Contents of `sk.lock`.
 #[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -31,6 +36,14 @@ pub struct Entry {
     pub source: String,
     /// Commit the skill was downloaded from, so later runs are reproducible.
     pub commit: String,
+    /// SHA-256 of the installed `SKILL.md`, lowercase hex, so a sync can report
+    /// what actually changed instead of only that something did.
+    ///
+    /// Defaults to empty so a lock written before hashes existed still loads;
+    /// the next `sk sync` fills it in and rewrites the lock at the current
+    /// version.
+    #[serde(default)]
+    pub hash: String,
 }
 
 impl Lock {
@@ -57,8 +70,11 @@ impl Lock {
             Error::with_source(format!("{} is invalid", path.display()), source)
         })?;
 
+        // A lock from an older format is read and rewritten by the next sync
+        // instead of being rejected, as long as it is recent enough that every
+        // field it has is still understood here.
         ensure!(
-            lock.version == LOCK_VERSION,
+            lock.version > 0 && lock.version <= LOCK_VERSION,
             "{} was written by another version of sk (lock version {}, expected {LOCK_VERSION}); delete it to re-resolve",
             path.display(),
             lock.version
@@ -79,10 +95,20 @@ impl Lock {
 
     /// Looks up a previously resolved commit for a link.
     pub fn commit_for(&self, source: &str) -> Option<&str> {
-        self.skills
-            .iter()
-            .find(|entry| entry.source == source)
-            .map(|entry| entry.commit.as_str())
+        self.entry_for(source).map(|entry| entry.commit.as_str())
+    }
+
+    /// Content hash recorded for a link, absent when the entry was written
+    /// before hashes were recorded.
+    pub fn hash_for(&self, source: &str) -> Option<&str> {
+        self.entry_for(source)
+            .map(|entry| entry.hash.as_str())
+            .filter(|hash| !hash.is_empty())
+    }
+
+    /// The entry recorded for a link, if any.
+    pub fn entry_for(&self, source: &str) -> Option<&Entry> {
+        self.skills.iter().find(|entry| entry.source == source)
     }
 
     /// Names of every skill `sk` has installed, used to prune removed ones.
@@ -121,6 +147,7 @@ mod tests {
                 name: "demo".into(),
                 source: "https://github.com/o/r/tree/main/demo".into(),
                 commit: "abc123".into(),
+                hash: "f2b2b7d1c0a5e3f4".into(),
             }],
         };
         lock.save(&layout).unwrap();
@@ -135,6 +162,10 @@ mod tests {
             reloaded.commit_for("https://github.com/o/r/tree/main/other"),
             None
         );
+        assert_eq!(
+            reloaded.hash_for("https://github.com/o/r/tree/main/demo"),
+            Some("f2b2b7d1c0a5e3f4")
+        );
         assert_eq!(reloaded.managed_names().collect::<Vec<_>>(), vec!["demo"]);
         std::fs::remove_dir_all(layout.root).ok();
     }
@@ -144,6 +175,26 @@ mod tests {
         let layout = temp_layout("version");
         std::fs::write(layout.lock(), "version = 99\n").unwrap();
         assert!(Lock::load(&layout).is_err());
+        std::fs::remove_dir_all(layout.root).ok();
+    }
+
+    #[test]
+    fn reads_an_older_lock_and_reports_no_hash() {
+        let layout = temp_layout("older");
+        // What sk wrote before hashes existed: version 1, no `hash` field.
+        std::fs::write(
+            layout.lock(),
+            "version = 1\n\n[[skill]]\nname = \"demo\"\nsource = \"https://github.com/o/r/tree/main/demo\"\ncommit = \"abc123\"\n",
+        )
+        .unwrap();
+
+        let lock = Lock::load(&layout).unwrap();
+        assert_eq!(lock.version, 1);
+        assert_eq!(lock.hash_for("https://github.com/o/r/tree/main/demo"), None);
+        assert_eq!(
+            lock.commit_for("https://github.com/o/r/tree/main/demo"),
+            Some("abc123")
+        );
         std::fs::remove_dir_all(layout.root).ok();
     }
 }

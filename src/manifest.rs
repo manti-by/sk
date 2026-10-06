@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::github::RepoRef;
-use crate::paths::Layout;
+use crate::paths::{Agent, Layout};
 use crate::{bail, ensure};
 
 /// Contents of `sk.toml`.
@@ -16,7 +16,7 @@ pub struct Manifest {
     pub project: Project,
     /// The skills this project depends on.
     #[serde(default)]
-    pub skills: Skills,
+    pub dependencies: Dependencies,
 }
 
 /// The `[project]` table.
@@ -41,6 +41,9 @@ pub struct Project {
     pub homepage: Option<String>,
     /// Repository URL.
     pub repository: Option<String>,
+    /// Which agent reads the installed skills: `agents` (default), `claude` or
+    /// `opencode`. It picks the directory skills land in.
+    pub agent: Option<Agent>,
 }
 
 /// One entry of `project.authors`.
@@ -58,10 +61,10 @@ pub enum Author {
     },
 }
 
-/// The `[skills]` table.
+/// The `[dependencies]` table, named after the equivalent in `uv` and Cargo.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct Skills {
+pub struct Dependencies {
     /// Links to skills, one per string.
     #[serde(default)]
     pub skills: Vec<String>,
@@ -83,7 +86,7 @@ impl Spec {
     /// `name = link` to install under a different directory name.
     pub fn parse(entry: &str) -> Result<Self> {
         let entry = entry.trim();
-        ensure!(!entry.is_empty(), "empty entry in [skills] skills");
+        ensure!(!entry.is_empty(), "empty entry in [dependencies] skills");
 
         // An explicit `name = link` rename; URLs may themselves contain `=`, so
         // the left side only counts as a name when it is not itself a link.
@@ -161,12 +164,17 @@ impl Manifest {
         Ok(manifest)
     }
 
+    /// The agent the skills are installed for, defaulting to `agents`.
+    pub fn agent(&self) -> Agent {
+        self.project.agent.unwrap_or_default()
+    }
+
     /// Parses every declared skill, rejecting duplicate directory names.
     pub fn specs(&self) -> Result<Vec<Spec>> {
-        let mut specs = Vec::with_capacity(self.skills.skills.len());
-        for entry in &self.skills.skills {
+        let mut specs = Vec::with_capacity(self.dependencies.skills.len());
+        for entry in &self.dependencies.skills {
             let spec = Spec::parse(entry)
-                .map_err(|error| Error::new(format!("in [skills] skills: {error}")))?;
+                .map_err(|error| Error::new(format!("in [dependencies] skills: {error}")))?;
             if let Some(previous) = specs.iter().find(|s: &&Spec| s.name == spec.name) {
                 bail!(
                     "skills `{}` and `{}` both install as `{}`; rename one with `name = <link>`",
@@ -192,10 +200,15 @@ description = ""
 # authors = ["Your Name"]
 # keywords = []
 
+# Which agent reads the installed skills: "agents" installs into
+# .agents/skills/, "claude" into .claude/skills/, "opencode" into
+# .opencode/skills/. Defaults to "agents".
+# agent = "claude"
+
 # Each entry is a link to a directory containing a SKILL.md. The skill is
-# installed under .agents/skills/<last path segment>/SKILL.md. Prefix an entry
+# installed under <agent>/skills/<last path segment>/SKILL.md. Prefix an entry
 # with "name = " to choose the directory name yourself.
-[skills]
+[dependencies]
 skills = [
   # "https://github.com/manti-by/openwiki/tree/master/skills/wiki-consistency",
   # "code-review = https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review",
@@ -215,7 +228,7 @@ mod tests {
 
     #[test]
     fn names_skills_after_the_last_url_segment() {
-        let parsed = specs("[skills]\nskills = [\"https://github.com/manti-by/openwiki/tree/master/skills/wiki-consistency\"]").unwrap();
+        let parsed = specs("[dependencies]\nskills = [\"https://github.com/manti-by/openwiki/tree/master/skills/wiki-consistency\"]").unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].name, "wiki-consistency");
         assert_eq!(parsed[0].repo.git_ref, "master");
@@ -224,7 +237,7 @@ mod tests {
     #[test]
     fn explicit_name_overrides_the_url_segment() {
         let parsed = specs(
-            "[skills]\nskills = [\"review = https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review\"]",
+            "[dependencies]\nskills = [\"review = https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review\"]",
         )
         .unwrap();
         assert_eq!(parsed[0].name, "review");
@@ -233,13 +246,13 @@ mod tests {
     #[test]
     fn keeps_query_strings_in_urls() {
         let parsed =
-            specs("[skills]\nskills = [\"https://github.com/o/r/tree/main/s?a=b\"]").unwrap();
+            specs("[dependencies]\nskills = [\"https://github.com/o/r/tree/main/s?a=b\"]").unwrap();
         assert_eq!(parsed[0].name, "s");
     }
 
     #[test]
     fn rejects_duplicate_names_and_bad_links() {
-        let duplicate = "[skills]\nskills = [\n  \"https://github.com/o/r/tree/main/a\",\n  \"b = https://github.com/o/r/tree/main/b\",\n  \"c = https://github.com/o/r2/tree/main/c\",\n]";
+        let duplicate = "[dependencies]\nskills = [\n  \"https://github.com/o/r/tree/main/a\",\n  \"b = https://github.com/o/r/tree/main/b\",\n  \"c = https://github.com/o/r2/tree/main/c\",\n]";
         assert!(
             specs(&duplicate.replace("\"b = ", "\"a = "))
                 .unwrap_err()
@@ -247,8 +260,8 @@ mod tests {
                 .contains("install as")
         );
 
-        assert!(specs("[skills]\nskills = [\"https://gitlab.com/o/r\"]").is_err());
-        assert!(specs("[skills]\nskills = [\"\"]").is_err());
+        assert!(specs("[dependencies]\nskills = [\"https://gitlab.com/o/r\"]").is_err());
+        assert!(specs("[dependencies]\nskills = [\"\"]").is_err());
     }
 
     #[test]
@@ -286,6 +299,18 @@ mod tests {
     }
 
     #[test]
+    fn agent_defaults_to_agents_and_overrides_when_set() {
+        let plain: Manifest = toml::from_str("[project]\nname = \"p\"\n").unwrap();
+        assert_eq!(plain.agent(), Agent::Agents);
+
+        let claude: Manifest =
+            toml::from_str("[project]\nname = \"p\"\nagent = \"claude\"\n").unwrap();
+        assert_eq!(claude.agent(), Agent::Claude);
+
+        assert!(toml::from_str::<Manifest>("[project]\nagent = \"nope\"\n").is_err());
+    }
+
+    #[test]
     fn template_round_trips() {
         let manifest: Manifest = toml::from_str(&Manifest::template("demo")).unwrap();
         assert_eq!(manifest.project.name.as_deref(), Some("demo"));
@@ -295,5 +320,8 @@ mod tests {
     #[test]
     fn rejects_unknown_fields() {
         assert!(toml::from_str::<Manifest>("[project]\nauthors = []\nnmae = \"typo\"\n").is_err());
+        // The old table name is not accepted silently, since a manifest that
+        // parses but declares no skills would look like a sync that did nothing.
+        assert!(toml::from_str::<Manifest>("[skills]\nskills = []\n").is_err());
     }
 }

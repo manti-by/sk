@@ -4,9 +4,10 @@ Guidance for agents and contributors working on `sk` itself.
 
 ## What this project is
 
-`sk` is a CLI that installs agent skills into `.agents/skills/`, the directory agents like Claude Code and
-Codex look in. It is modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` is the manifest you edit, and
-`sk sync` reconciles `.agents/skills/` against it. Rust, edition 2024.
+`sk` is a CLI that installs agent skills into the skills directory of the agent named by `project.agent` in
+`sk.toml`, which is `.agents/skills/` by default and `.claude/skills/` or `.opencode/skills/` on request. It is
+modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` is the manifest you edit, and `sk sync` reconciles
+that directory against it. Rust, edition 2024.
 
 ## Commands
 
@@ -15,6 +16,7 @@ Codex look in. It is modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` i
 | `make build` | Build the binary into `target/debug/sk`. |
 | `make run` | Run all tests. Unit tests only; none touch the network. |
 | `make check` | `fmt --check`, clippy and tests; the gate before committing. |
+| `make release` | Runs the `make check` gate, then builds `target/release/sk`. |
 | `make sync` | Install this project's own declared skills. |
 | `cargo build` | The same build, without the Makefile. |
 | `cargo test` | The same tests, without the Makefile. |
@@ -26,15 +28,15 @@ Codex look in. It is modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` i
 | Path | Role |
 | --- | --- |
 | `src/main.rs` | Argument parsing and dispatch. Keeps no logic beyond wiring. |
-| `src/manifest.rs` | `sk.toml` schema (`Manifest`, `Project`, `Skills`, `Spec`) and the `init` template. |
+| `src/manifest.rs` | `sk.toml` schema (`Manifest`, `Project`, `Dependencies`, `Spec`) and the `init` template. |
 | `src/lock.rs` | `sk.lock` schema (`Lock`, `Entry`), load and save. |
 | `src/github.rs` | `RepoRef` link parsing and the HTTP `Client`. The only place that knows about GitHub. |
 | `src/sync.rs` | `sync`: resolve, download, install, prune, rewrite the lock. |
 | `src/init.rs` | `init`: create the three entries, never overwriting. |
 | `src/parallel.rs` | `parallel::map`, a small ordered work queue over `std::thread::scope`. |
-| `src/paths.rs` | `Layout`, the paths of every file `sk` reads or writes. |
+| `src/paths.rs` | `Agent` and `Layout`, the paths of every file `sk` reads or writes. |
 | `src/error.rs` | The `Error` type, `Result`, and the `bail!`/`ensure!` macros. |
-| `src/util.rs` | `write_atomic`, so a reader never sees a half-written `SKILL.md`. |
+| `src/util.rs` | `write_atomic`, so a reader never sees a half-written `SKILL.md`, and `sha256_hex`, the digest recorded per skill. |
 
 ## Conventions
 
@@ -48,6 +50,8 @@ Codex look in. It is modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` i
   a truncated `SKILL.md`.
 - Anything that becomes a directory name is validated by `manifest::is_valid_name`. No path built from a
   manifest link may contain user-controlled separators.
+- Changing the shape of `sk.lock` means bumping `lock::LOCK_VERSION`. A lock from an older version is upgraded
+  by the next sync, so new fields need a `serde(default)` to keep old locks loadable.
 
 ## Working on this repository
 
@@ -55,7 +59,8 @@ Codex look in. It is modelled on [`uv`](https://docs.astral.sh/uv/): `sk.toml` i
 `./target/debug/sk sync` after editing `sk.toml`.
 
 Because `sk.lock` pins commits, upstream changes to a skill only arrive via `sk sync --upgrade`. Commit the
-refreshed lock with the manifest change.
+refreshed lock with the manifest change. Each entry also carries the SHA-256 of the installed `SKILL.md`, so
+reviewing the lock diff shows whether content actually moved.
 
 ## Adding a command
 

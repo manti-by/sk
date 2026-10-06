@@ -7,8 +7,12 @@ use crate::github::Client;
 use crate::lock::{Entry, LOCK_VERSION, Lock};
 use crate::manifest::{Manifest, Spec};
 use crate::parallel;
-use crate::paths::{Layout, SKILL_FILE, SKILLS_DIR};
-use crate::util::write_atomic;
+use crate::paths::{Layout, SKILL_FILE};
+use crate::util::{sha256_hex, write_atomic};
+
+/// How many hex characters of a digest the report shows. Enough to spot the
+/// change in a diff, short enough not to drown the report.
+const SHORT_HASH: usize = 8;
 
 /// What happened to one skill during a sync.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,24 +43,54 @@ struct Installed {
     status: Status,
     /// Commit the content came from, recorded in `sk.lock`.
     commit: String,
+    /// SHA-256 of the installed `SKILL.md`, recorded in `sk.lock`.
+    hash: String,
+    /// Digest `sk.lock` held for this skill before the sync, when it had one.
+    previous_hash: Option<String>,
+}
+
+impl Installed {
+    /// The `old -> new` digest shown in the report, or nothing when the skill
+    /// did not change or there is no earlier digest to compare against.
+    fn digest_change(&self) -> Option<String> {
+        if self.status == Status::Unchanged {
+            return None;
+        }
+        fn short(hash: &str) -> &str {
+            &hash[..hash.len().min(SHORT_HASH)]
+        }
+        Some(
+            match self.previous_hash.as_deref().filter(|p| !p.is_empty()) {
+                Some(previous) if previous != self.hash => {
+                    format!("{} -> {}", short(previous), short(&self.hash))
+                }
+                _ => short(&self.hash).to_owned(),
+            },
+        )
+    }
 }
 
 /// Downloads and installs all skills, then refreshes `sk.lock`.
-pub fn run(layout: &Layout, upgrade: bool) -> Result<()> {
-    let manifest = Manifest::load(layout)?;
+pub fn run(root: &Layout, upgrade: bool) -> Result<()> {
+    let manifest = Manifest::load(root)?;
+    let layout = &root.with_agent(manifest.agent());
     let lock = Lock::load(layout)?;
     let specs = manifest.specs()?;
 
     if specs.is_empty() {
         println!(
-            "No skills in {}; add links under [skills] skills.",
+            "No skills in {}; add links under [dependencies] skills.",
             layout.manifest().display()
         );
         return Ok(());
     }
 
     let client = Client::from_env();
-    println!("Syncing {} skill(s) into {SKILLS_DIR}/", specs.len());
+    println!(
+        "Syncing {} skill(s) into {}/",
+        specs.len(),
+        layout.agent.skills_dir()
+    );
 
     let results = parallel::map(specs.clone(), |_, spec| {
         install(&client, layout, &lock, &spec, upgrade)
@@ -68,15 +102,25 @@ pub fn run(layout: &Layout, upgrade: bool) -> Result<()> {
     for (spec, result) in specs.iter().zip(results) {
         match result {
             Ok(installed) => {
-                println!(
-                    "  {:<9} {}/{SKILL_FILE}",
-                    installed.status.label(),
-                    spec.name
-                );
+                // Show the digest so a sync says what changed, not just that
+                // something did.
+                match installed.digest_change() {
+                    Some(digest) => println!(
+                        "  {:<9} {}/{SKILL_FILE}  {digest}",
+                        installed.status.label(),
+                        spec.name
+                    ),
+                    None => println!(
+                        "  {:<9} {}/{SKILL_FILE}",
+                        installed.status.label(),
+                        spec.name
+                    ),
+                }
                 entries.push(Entry {
                     name: spec.name.clone(),
                     source: spec.source.clone(),
                     commit: installed.commit,
+                    hash: installed.hash,
                 });
             }
             Err(error) => failures.push(format!("{}: {error}", spec.name)),
@@ -136,7 +180,12 @@ fn install(
         write_atomic(&target, &contents)?;
     }
 
-    Ok(Installed { status, commit })
+    Ok(Installed {
+        status,
+        commit,
+        hash: sha256_hex(&contents),
+        previous_hash: lock.hash_for(&spec.source).map(str::to_owned),
+    })
 }
 
 /// Removes skills `sk` installed earlier that are no longer declared.
@@ -203,6 +252,7 @@ mod tests {
                     name: (*name).to_owned(),
                     source: format!("https://github.com/o/r/tree/main/{name}"),
                     commit: "abc123".to_owned(),
+                    hash: sha256_hex(name.as_bytes()),
                 })
                 .collect(),
         }
@@ -210,6 +260,52 @@ mod tests {
 
     fn spec_of(name: &str) -> Spec {
         Spec::parse(&format!("https://github.com/o/r/tree/main/{name}")).unwrap()
+    }
+
+    #[test]
+    fn report_shows_the_digest_only_when_the_content_changed() {
+        let installed = |status, hash: &str, previous: Option<&str>| Installed {
+            status,
+            commit: "abc123".to_owned(),
+            hash: hash.to_owned(),
+            previous_hash: previous.map(str::to_owned),
+        };
+
+        // Unchanged skills stay quiet, so the report keeps pointing at real work.
+        assert_eq!(
+            installed(
+                Status::Unchanged,
+                "aaaa1111bbbb2222",
+                Some("aaaa1111bbbb2222")
+            )
+            .digest_change(),
+            None
+        );
+
+        // A new skill shows the digest it now has.
+        assert_eq!(
+            installed(Status::Added, "aaaa1111bbbb2222", None).digest_change(),
+            Some("aaaa1111".to_owned())
+        );
+
+        // A changed skill shows both digests, which is the point of recording
+        // them: the diff alone does not say what the content was.
+        assert_eq!(
+            installed(
+                Status::Updated,
+                "cccc3333dddd4444",
+                Some("aaaa1111bbbb2222")
+            )
+            .digest_change()
+            .as_deref(),
+            Some("aaaa1111 -> cccc3333")
+        );
+
+        // A lock written before hashes existed still reports the new digest.
+        assert_eq!(
+            installed(Status::Updated, "aaaa1111bbbb2222", Some("")).digest_change(),
+            Some("aaaa1111".to_owned())
+        );
     }
 
     #[test]
@@ -246,6 +342,23 @@ mod tests {
         assert!(layout.skill_dir("empty").exists());
         assert!(layout.skills_dir().join("notes.md").exists());
         std::fs::remove_dir_all(&layout.root).ok();
+    }
+
+    #[test]
+    fn prune_follows_the_configured_agent() {
+        let root = layout("prune-agent");
+        let claude = root.with_agent(crate::paths::Agent::Claude);
+        std::fs::create_dir_all(claude.skill_dir("stale")).unwrap();
+        std::fs::write(claude.skill_file("stale"), b"skill").unwrap();
+
+        // The default agent's directory is untouched.
+        let removed = prune(&root, &lock_of(&["stale"]), &[]).unwrap();
+        assert!(removed.is_empty());
+        assert!(claude.skill_file("stale").exists());
+
+        assert_eq!(prune(&claude, &lock_of(&["stale"]), &[]).unwrap().len(), 1);
+        assert!(!claude.skill_dir("stale").exists());
+        std::fs::remove_dir_all(&root.root).ok();
     }
 
     #[test]

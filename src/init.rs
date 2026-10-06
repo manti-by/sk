@@ -5,12 +5,27 @@ use crate::manifest::Manifest;
 use crate::paths::Layout;
 use crate::util::write_atomic;
 
-/// Creates `.agents/skills/`, `sk.toml` and `sk.lock`, leaving any file that
-/// already exists untouched.
+/// Creates the skills directory of the configured agent, `sk.toml` and
+/// `sk.lock`, leaving any file that already exists untouched.
+///
+/// The manifest is written first, so the directory created is the one the
+/// `agent` setting asks for even on a fresh project.
 pub fn run(layout: &Layout) -> crate::error::Result<()> {
     let mut created = Vec::new();
     let mut kept = Vec::new();
 
+    let manifest_path = layout.manifest();
+    if manifest_path.exists() {
+        kept.push(manifest_path.display().to_string());
+    } else {
+        write_atomic(
+            &manifest_path,
+            Manifest::template(&default_project_name(&layout.root)).as_bytes(),
+        )?;
+        created.push(manifest_path.display().to_string());
+    }
+
+    let layout = &layout.with_agent(Manifest::load(layout)?.agent());
     let skills_dir = layout.skills_dir();
     if skills_dir.exists() {
         kept.push(skills_dir.display().to_string());
@@ -22,17 +37,6 @@ pub fn run(layout: &Layout) -> crate::error::Result<()> {
             )
         })?;
         created.push(format!("{}/", skills_dir.display()));
-    }
-
-    let manifest_path = layout.manifest();
-    if manifest_path.exists() {
-        kept.push(manifest_path.display().to_string());
-    } else {
-        write_atomic(
-            &manifest_path,
-            Manifest::template(&default_project_name(&layout.root)).as_bytes(),
-        )?;
-        created.push(manifest_path.display().to_string());
     }
 
     let lock_path = layout.lock();
@@ -54,9 +58,10 @@ pub fn run(layout: &Layout) -> crate::error::Result<()> {
         println!("exists   {path} (left unchanged)");
     }
 
-    if Manifest::load(layout)?.skills.skills.is_empty() {
+    let manifest = Manifest::load(layout)?;
+    if manifest.dependencies.skills.is_empty() {
         println!(
-            "\nAdd skill links under [skills] skills in {}, then run `sk sync`.",
+            "\nAdd skill links under [dependencies] skills in {}, then run `sk sync`.",
             manifest_path.display()
         );
     }
@@ -115,6 +120,29 @@ mod tests {
             "version = 1\n"
         );
         std::fs::remove_dir_all(&layout.root).ok();
+    }
+
+    #[test]
+    fn creates_the_directory_of_the_configured_agent() {
+        for (agent, dir) in [
+            ("agents", ".agents"),
+            ("claude", ".claude"),
+            ("opencode", ".opencode"),
+        ] {
+            let layout = layout(&format!("agent-{agent}"));
+            std::fs::write(
+                layout.manifest(),
+                format!("[project]\nname = \"p\"\nagent = \"{agent}\"\n"),
+            )
+            .unwrap();
+
+            run(&layout).unwrap();
+
+            assert!(layout.root.join(dir).join("skills").is_dir());
+            assert!(layout.manifest().is_file());
+            assert!(layout.lock().is_file());
+            std::fs::remove_dir_all(&layout.root).ok();
+        }
     }
 
     #[test]

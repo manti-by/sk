@@ -1,6 +1,6 @@
 //! `sk` manages agent skills the way `uv` manages Python packages: declare the
-//! skills you want in `sk.toml`, then `sk sync` installs them under
-//! `.agents/skills/`.
+//! skills you want in `sk.toml`, then `sk sync` installs them under the skills
+//! directory of the agent named by `project.agent`.
 
 mod error;
 mod github;
@@ -25,8 +25,11 @@ USAGE:
     sk <COMMAND> [OPTIONS] [DIR]
 
 COMMANDS:
-    init            Create .agents/skills/, sk.toml and sk.lock if they are missing
-    sync            Download every skill in sk.toml into .agents/skills/
+    init            Create the agent's skills directory, sk.toml and sk.lock
+                    if they are missing
+    sync            Download every skill in sk.toml into the agent's skills
+                    directory (.agents/skills/, .claude/skills/ or
+                    .opencode/skills/, picked by project.agent in sk.toml)
 
 OPTIONS:
     sync --upgrade  Re-resolve branches and tags instead of using sk.lock commits

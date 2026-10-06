@@ -4,14 +4,16 @@
 #   make build   compile the binary into target/debug/sk
 #   make run     run the test suite
 #   make check   fmt, clippy and tests
+#   make release run the gate, then build target/release/sk
 #   make install install the binary into CARGO_HOME/bin
 #   make clean   remove build artifacts
 
 CARGO ?= cargo
 BIN := target/debug/sk
+RELEASE_BIN := target/release/sk
 
 .DEFAULT_GOAL := build
-.PHONY: build run test check fmt fmt-check lint clean install sync
+.PHONY: build run test check fmt fmt-check lint clean install sync release
 
 ## build: compile the binary.
 build:
@@ -38,6 +40,12 @@ fmt-check:
 ## lint: run clippy over every target; must stay warning-free.
 lint:
 	$(CARGO) clippy --all-targets
+
+# `release` builds the optimized binary. It runs the same gate as `check` first,
+# so an unformatted or unlinted tree cannot produce a release artifact.
+release: check
+	$(CARGO) build --release
+	@ls -lh $(RELEASE_BIN)
 
 ## install: install the binary into CARGO_HOME/bin.
 install:
