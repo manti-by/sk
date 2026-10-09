@@ -62,6 +62,12 @@ Because `sk.lock` pins commits, upstream changes to a skill only arrive via `sk 
 refreshed lock with the manifest change. Each entry also carries the SHA-256 of the installed `SKILL.md`, so
 reviewing the lock diff shows whether content actually moved.
 
+Releases are cut by CI from a version bump, not by hand: bump `version` in `Cargo.toml` (and the matching
+`project.version` in `sk.toml`), merge to `master`, and `.github/workflows/release.yml` builds the four
+platform binaries and publishes `v<version>`. The publish job is gated behind `make check`, so a red tree
+never releases. `.github/workflows/ci.yml` runs that gate plus an offline smoke test of `install.sh` on
+every push and pull request.
+
 ## Adding a command
 
 1. Add a module with a `run` entry point and a test block.
