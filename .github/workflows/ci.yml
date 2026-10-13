@@ -26,84 +26,16 @@ jobs:
       - name: cargo fmt, clippy and tests
         run: make check
 
-      - name: Check installer syntax
-        run: sh -n install.sh
-
-      - name: Lint installer
+      - name: Check shell syntax
         run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck install.sh
-          else
-            echo "shellcheck not installed; skipping"
-          fi
+          sh -n install.sh
+          for script in .github/scripts/*.sh; do bash -n "$script"; done
+
+      - name: Lint shell
+        run: .github/scripts/lint-shell.sh
 
       - name: Installer help
         run: ./install.sh --help
 
-      # Exercises the download, checksum and install path without the network:
-      # a stub release is served from a local Python http.server and the script
-      # is pointed at it with SK_RELEASE_BASE. The corrupt-archive,
-      # missing-checksum and symlinked-binary cases assert the installer fails
-      # closed.
       - name: Installer smoke test
-        run: |
-          set -eu
-
-          work="$RUNNER_TEMP/installer"
-          rm -rf "$work"
-          mkdir -p "$work/dist/v9.9.9" "$work/dist/v8.8.8" "$work/dist/v7.7.7" \
-            "$work/good" "$work/bad" "$work/nosum" "$work/sym"
-
-          printf '#!/bin/sh\necho "sk 9.9.9"\n' > "$work/sk"
-          chmod 755 "$work/sk"
-          tar -czf "$work/dist/v9.9.9/sk-9.9.9-linux-x86_64.tar.gz" -C "$work" sk
-          (
-            cd "$work/dist/v9.9.9"
-            sha256sum ./*.tar.gz > checksums.txt
-            for f in ./*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
-          )
-          # A second release whose archive is present but whose .sha256 is not.
-          cp "$work/dist/v9.9.9/sk-9.9.9-linux-x86_64.tar.gz" \
-            "$work/dist/v8.8.8/sk-8.8.8-linux-x86_64.tar.gz"
-          # A third release whose `sk` is a symlink pointing outside the archive.
-          ln -s /etc/passwd "$work/sym/sk"
-          tar -czf "$work/dist/v7.7.7/sk-7.7.7-linux-x86_64.tar.gz" -C "$work/sym" sk
-          (
-            cd "$work/dist/v7.7.7"
-            f=./sk-7.7.7-linux-x86_64.tar.gz
-            sha256sum "$f" > "$f.sha256"
-          )
-
-          python3 -m http.server 8123 --bind 127.0.0.1 --directory "$work/dist" \
-            >/dev/null 2>&1 &
-          server=$!
-          trap 'kill "$server" 2>/dev/null || true' EXIT
-
-          sleep 1
-
-          SK_RELEASE_BASE=http://127.0.0.1:8123 SK_INSTALL_DIR="$work/good" \
-            ./install.sh --version v9.9.9
-          test -x "$work/good/sk"
-          test "$("$work/good/sk" --version)" = "sk 9.9.9"
-
-          printf 'garbage' >> "$work/dist/v9.9.9/sk-9.9.9-linux-x86_64.tar.gz"
-          if SK_RELEASE_BASE=http://127.0.0.1:8123 SK_INSTALL_DIR="$work/bad" \
-            ./install.sh --version v9.9.9; then
-            echo "expected the installer to reject a corrupt archive" >&2
-            exit 1
-          fi
-          test ! -e "$work/bad/sk"
-
-          if SK_RELEASE_BASE=http://127.0.0.1:8123 SK_INSTALL_DIR="$work/nosum" \
-            ./install.sh --version v8.8.8; then
-            echo "expected the installer to refuse a release without a checksum" >&2
-            exit 1
-          fi
-          test ! -e "$work/nosum/sk"
-
-          if SK_RELEASE_BASE=http://127.0.0.1:8123 SK_INSTALL_DIR="$work/symlink" \
-            ./install.sh --version v7.7.7; then
-            echo "expected the installer to reject a symlinked sk binary" >&2
-            exit 1
-          fi
-          test ! -e "$work/symlink/sk"
+        run: .github/scripts/smoke-installer.sh

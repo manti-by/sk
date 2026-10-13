@@ -42,37 +42,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Compare the `version` line in Cargo.toml with the same line at the
-      # commit that was the ref before this push. An all-zero `before` means a
-      # brand-new branch with no predecessor, which counts as a change.
-      #
-      # `BEFORE` and `EVENT_NAME` come in through `env:` rather than a direct
+      # BEFORE and EVENT_NAME come in through `env:` rather than a direct
       # `${{ … }}` interpolation, per GitHub's script-injection hardening guide.
       - name: Detect a version bump
         id: detect
         env:
           BEFORE: ${{ github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -eu
-          current=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n 1)
-
-          previous=''
-          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-            previous=$(git show "$BEFORE:Cargo.toml" 2>/dev/null \
-              | sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-              | head -n 1 || true)
-          fi
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$current" != "$previous" ]; then
-            changed=true
-          else
-            changed=false
-          fi
-
-          echo "Detected version $current (was '${previous:-none}'), changed=$changed"
-          echo "version=$current" >> "$GITHUB_OUTPUT"
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+        run: .github/scripts/detect-version.sh
 
   build:
     needs: [check, version]
@@ -81,7 +58,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -115,17 +91,9 @@ jobs:
       - name: Package
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -eu
-          staging="$(mktemp -d)"
-          cp "target/${{ matrix.target }}/release/sk" "$staging/sk"
-          for extra in README.md LICENSE LICENSE.md; do
-            if [ -f "$extra" ]; then
-              cp "$extra" "$staging/"
-            fi
-          done
-          mkdir -p dist
-          tar -czf "dist/sk-${VERSION}-${{ matrix.asset }}.tar.gz" -C "$staging" .
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
+        run: .github/scripts/package.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -138,7 +106,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -146,37 +113,12 @@ jobs:
           pattern: sk-*
           merge-multiple: true
 
-      # One aggregate checksums.txt for a human, plus a per-asset .sha256 that
-      # install.sh downloads and verifies with `sha256sum -c`.
       - name: Checksums
-        run: |
-          set -eu
-          cd dist
-          sha256sum ./*.tar.gz > checksums.txt
-          for f in ./*.tar.gz; do
-            sha256sum "$f" > "$f.sha256"
-          done
-          cat checksums.txt
+        run: .github/scripts/checksums.sh
 
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
           SHA: ${{ github.sha }}
-        run: |
-          set -eu
-          tag="v$VERSION"
-
-          # A manual re-run must be able to repair a release whose creation
-          # succeeded but whose asset upload failed, so an existing release is
-          # updated in place rather than skipped.
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release $tag already exists; uploading any missing assets"
-            gh release upload "$tag" dist/* --clobber
-          else
-            gh release create "$tag" \
-              --target "$SHA" \
-              --title "sk $tag" \
-              --generate-notes \
-              dist/*
-          fi
+        run: .github/scripts/publish.sh

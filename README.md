@@ -44,8 +44,9 @@ $ curl -LsSf https://raw.githubusercontent.com/manti-by/sk/master/install.sh | s
 ```
 
 Prebuilt binaries are published for Linux and macOS on both x86_64 and arm64. Read the script before
-piping it to a shell if you prefer; it is plain POSIX `sh` and only needs `curl` or `wget`, `tar`, `uname`
-and a SHA-256 tool. Pin a release with `--version`, or install somewhere else with `--dir`:
+piping it to a shell if you prefer; it is plain POSIX `sh` and only needs `curl` or `wget`, `tar`, `sed`,
+`uname`, `mktemp` and a SHA-256 tool (`sha256sum`, `shasum` or `openssl`). Pin a release with `--version`,
+or install somewhere else with `--dir`:
 
 ```console
 $ curl -LsSf https://raw.githubusercontent.com/manti-by/sk/master/install.sh | sh -s -- --version v0.1.2

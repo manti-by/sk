@@ -12,7 +12,8 @@
 set -eu
 
 REPO="${SK_REPO:-manti-by/sk}"
-INSTALL_DIR="${SK_INSTALL_DIR:-$HOME/.local/bin}"
+# Resolved after the flags are parsed, so `--dir` wins even without a $HOME.
+INSTALL_DIR="${SK_INSTALL_DIR:-}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 RELEASE_BASE="${SK_RELEASE_BASE:-https://github.com/$REPO/releases/download}"
 VERSION="${SK_VERSION:-}"
@@ -65,6 +66,11 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$INSTALL_DIR" ]; then
+    [ -n "${HOME:-}" ] || error "HOME is not set; pass --dir <path> or set SK_INSTALL_DIR"
+    INSTALL_DIR="$HOME/.local/bin"
+fi
 
 # Fetches a URL to stdout, using curl or wget and the GitHub token when one is
 # set. `-f`/`--fail` turns an HTTP error into a non-zero exit.
@@ -160,9 +166,12 @@ fi
 
 tar -xzf "$tmp/$archive" -C "$tmp" || error "could not extract $archive"
 # Reject a symlinked binary: `[ -f ]` follows links, so an archive could smuggle
-# `sk -> /etc/passwd` and have its target copied into $INSTALL_DIR.
-[ -f "$tmp/sk" ] && [ ! -L "$tmp/sk" ] ||
+# `sk -> /etc/passwd` and have its target copied into $INSTALL_DIR. Written as
+# an `if` rather than `[ … ] && [ … ] || error` so the two conditions read as a
+# single check (shellcheck SC2015).
+if [ ! -f "$tmp/sk" ] || [ -L "$tmp/sk" ]; then
     error "$archive did not contain a regular sk binary"
+fi
 
 mkdir -p "$INSTALL_DIR" || error "could not create $INSTALL_DIR"
 
