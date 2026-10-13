@@ -15,6 +15,7 @@ keeping the index current). Pages are plain Markdown so they stay human-readable
 - `INDEX.md` - Catalog of every page with a one-line summary. Kept current on each new page.
 - `QUESTIONS.md` - Open questions about wiki discrepancies, awaiting a human answer.
 - `pages/YYYY-MM-DD-<topic>.md` - The pages themselves, created on demand by `/wiki-update`.
+- `docs/` - **User-facing documentation**, published to readers rather than to the team. See "Docs" below.
 - `.openwiki-sessions.json` - Internal cache mapping session id to page file (`{ "<session_id>": "<file>.md" }`),
   kept current by `/wiki-update`; created on first use. Optional.
 
@@ -27,6 +28,25 @@ pages/YYYY-MM-DD-kebab-case-topic.md
 - Date-prefixed so pages sort chronologically and filenames stay unique.
 - `topic` is a short kebab-case slug of the subject (e.g. `multi-agent-plan-step`, `composite-command`).
 - Meta files (`README.md`, `TEMPLATE.md`, `INDEX.md`, `QUESTIONS.md`) are **not** date-prefixed.
+
+## Docs
+
+`docs/` holds documentation for people *using* `sk`, not for people working on it. It is the one part of
+the wiki that is written for an external audience, so it follows different rules from `pages/`:
+
+- **No frontmatter, no date prefix, no page `type`.** A doc is not a session, so it has no session id
+  and nothing to cross-link. Filenames are plain and stable, because the repository `README.md` links to
+  them by relative path and those links must not rot.
+- **Console transcripts are copied from a real run.** Run the command and paste what it printed. A
+  transcript that drifts from the binary is worse than no transcript.
+- **Every behavioural claim is checked against the code**, not remembered. Field lists come from the
+  `serde` structs, flags from the argument parser, paths from the module that builds them.
+- **README.md is the front door and stays short**: what the tool is, one working example, install, and
+  links out. `docs/INSTALL.md` covers install options; `docs/MORE.md` owns the command list and the
+  `sk.toml` / `sk.lock` reference. When a command is added, `docs/MORE.md` is updated, not README.
+
+Docs are edited in the same commit as the behaviour they describe, so a `make check` failure means the
+transcript is stale.
 
 ## Page types
 

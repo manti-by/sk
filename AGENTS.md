@@ -18,6 +18,8 @@ that directory against it. Rust, edition 2024.
 | `make check` | `fmt --check`, clippy and tests; the gate before committing. |
 | `make release` | Runs the `make check` gate, then builds `target/release/sk`. |
 | `make sync` | Install this project's own declared skills. |
+| `make install` | `cargo install --path .`, into `CARGO_HOME/bin`. What `wiki/docs/INSTALL.md` tells users. |
+| `make clean` | `cargo clean`. |
 | `cargo build` | The same build, without the Makefile. |
 | `cargo test` | The same tests, without the Makefile. |
 | `cargo clippy --all-targets` | Lint. Must stay warning-free. |
@@ -37,6 +39,8 @@ that directory against it. Rust, edition 2024.
 | `src/paths.rs` | `Agent` and `Layout`, the paths of every file `sk` reads or writes. |
 | `src/error.rs` | The `Error` type, `Result`, and the `bail!`/`ensure!` macros. |
 | `src/util.rs` | `write_atomic`, so a reader never sees a half-written `SKILL.md`, and `sha256_hex`, the digest recorded per skill. |
+| `README.md` | The front door: what `sk` is, one worked example, install, links out. Kept short on purpose. |
+| `wiki/docs/` | User-facing docs. `INSTALL.md` covers install options; `MORE.md` owns the command list and the `sk.toml`/`sk.lock` reference. |
 
 ## Conventions
 
@@ -52,6 +56,10 @@ that directory against it. Rust, edition 2024.
   manifest link may contain user-controlled separators.
 - Changing the shape of `sk.lock` means bumping `lock::LOCK_VERSION`. A lock from an older version is upgraded
   by the next sync, so new fields need a `serde(default)` to keep old locks loadable.
+- Anything the user sees is documented in exactly one place. `README.md` is the short front door and links
+  out; `wiki/docs/MORE.md` owns the command list and the `sk.toml` / `sk.lock` reference; `wiki/docs/INSTALL.md`
+  owns install. Do not restate a command list in more than one file, and keep console transcripts copied from
+  a real run of the binary rather than from memory. `wiki/README.md` documents these rules under "Docs".
 
 ## Working on this repository
 
@@ -77,5 +85,6 @@ instead of interpolating `${{ … }}` into shell text, and assume they run from 
 ## Adding a command
 
 1. Add a module with a `run` entry point and a test block.
-2. Wire it in the `match command` in `src/main.rs` and add it to `USAGE` and to the README table.
+2. Wire it in the `match command` in `src/main.rs`, add it to `USAGE`, and add it to the command list in
+   `wiki/docs/MORE.md`. The README does not repeat that list, so it needs no edit.
 3. Keep the module free of argument parsing; `main.rs` owns that.
