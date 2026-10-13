@@ -36,11 +36,31 @@ Wrote ./sk.lock
 
 ## Installation
 
-`sk` is a single Rust binary, so installation is `cargo install`. It goes into `~/.cargo/bin`, which
+The quickest route, on macOS and Ubuntu, is the install script. It downloads the newest release for
+your machine, verifies its SHA-256 and drops the binary into `~/.local/bin`:
+
+```console
+$ curl -LsSf https://raw.githubusercontent.com/manti-by/sk/master/install.sh | sh
+```
+
+Prebuilt binaries are published for Linux and macOS on both x86_64 and arm64. Read the script before
+piping it to a shell if you prefer; it is plain POSIX `sh` and only needs `curl` or `wget`, `tar`, `sed`,
+`uname`, `mktemp` and a SHA-256 tool (`sha256sum`, `shasum` or `openssl`). Pin a release with `--version`,
+or install somewhere else with `--dir`:
+
+```console
+$ curl -LsSf https://raw.githubusercontent.com/manti-by/sk/master/install.sh | sh -s -- --version v0.1.2
+$ curl -LsSf https://raw.githubusercontent.com/manti-by/sk/master/install.sh | sh -s -- --dir /usr/local/bin
+```
+
+Set `SK_INSTALL_DIR` to change the target directory without a flag. If `~/.local/bin` is not on your
+`PATH`, the script says so; add it before running `sk`.
+
+`sk` is also a single Rust binary, so `cargo install` works. It goes into `~/.cargo/bin`, which
 [`rustup`](https://rustup.rs) puts on your `PATH`:
 
 ```console
-$ git clone https://github.com/<you>/sk
+$ git clone https://github.com/manti-by/sk
 $ cd sk
 $ cargo install --path .
 ```
@@ -66,14 +86,14 @@ $ cargo install --path . --force            # overwrite an installed sk
 $ cargo install --path . --locked           # build with the committed Cargo.lock
 ```
 
-To remove it again:
+To remove a script install, delete the binary; to remove a `cargo install`:
 
 ```console
+$ rm ~/.local/bin/sk
 $ cargo uninstall sk
 ```
 
-There is no `curl | sh` installer or Homebrew tap yet. `uv` has both because it ships prebuilt binaries;
-`sk` is `cargo install` only until it is published somewhere.
+There is no Homebrew tap yet. The install script covers `curl | sh` the way `uv` does.
 
 ## Commands
 
@@ -183,3 +203,9 @@ $ make release   # run the check gate, then build target/release/sk
 The Makefile only wraps cargo, so `cargo build`, `cargo test` and `cargo clippy` work as usual. `make release`
 depends on `make check`, so a tree that fails the gate never produces a release binary; it prints the size of
 the result when it finishes.
+
+Releases are automated. Bump `version` in `Cargo.toml` (and the matching `project.version` in `sk.toml`), open
+a pull request and merge it into `master`; `.github/workflows/release.yml` then builds Linux and macOS binaries
+for x86_64 and arm64, checksums them and publishes a `v<version>` GitHub release. A push that does not change
+the version builds nothing. `.github/workflows/ci.yml` runs `make check` plus an offline smoke test of
+`install.sh` on every push and pull request.

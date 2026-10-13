@@ -62,6 +62,18 @@ Because `sk.lock` pins commits, upstream changes to a skill only arrive via `sk 
 refreshed lock with the manifest change. Each entry also carries the SHA-256 of the installed `SKILL.md`, so
 reviewing the lock diff shows whether content actually moved.
 
+Releases are cut by CI from a version bump, not by hand: bump `version` in `Cargo.toml` (and the matching
+`project.version` in `sk.toml`), merge to `master`, and `.github/workflows/release.yml` builds the four
+platform binaries and publishes `v<version>`. The publish job is gated behind `make check`, so a red tree
+never releases. `.github/workflows/ci.yml` runs that gate plus an offline smoke test of `install.sh` on
+every push and pull request.
+
+Both workflows keep their shell in `.github/scripts/`, one script per step, rather than inlined `run:`
+blocks. An inline script gets no syntax highlighting, no editor tooling and no shellcheck; a file in that
+directory gets all three, and `ci.yml` lints the whole directory on every push. The scripts are `bash`,
+take their inputs from the environment rather than arguments so the workflow can pass them through `env:`
+instead of interpolating `${{ … }}` into shell text, and assume they run from the repository root.
+
 ## Adding a command
 
 1. Add a module with a `run` entry point and a test block.

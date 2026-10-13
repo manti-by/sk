@@ -9,6 +9,7 @@ with `/wiki-sync`; the plugin only scaffolds the wiki.
 
 _Newest first._
 
+- [MNT-236: Automatic release creation](pages/2026-10-09-release-workflow-and-install-script.md) — Implementation of MNT-236: Automatic release creation (2026-10-09)
 - [sk — per-agent skill directories and content-hashed lock](pages/2026-10-06-sk-agent-dir-and-lock-hashes.md) — `agent` in `sk.toml` picks `.agents`/`.claude`/`.opencode`, and `sk.lock` records a SHA-256 per skill (2026-10-06)
 - [sk CLI — agent skill manager](pages/2026-10-06-sk-cli-implementation.md) — built the `sk` Rust CLI that installs agent skills like uv installs packages (2026-10-06)
 
